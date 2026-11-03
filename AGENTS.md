@@ -29,6 +29,7 @@ OsloSprint1450 is preparing for a hackathon. The product, language, framework, d
 - Stage only task changes. Do not reset, delete, rewrite, or force-push another contributor's work.
 
 ## Review and merge policy
+- Bootstrap exception: small README/docs-only PRs from repository contributors may merge after the `bootstrap-policy` scope gate. This is not AI review. Other bootstrap PRs require glumbis to run the Bootstrap policy workflow with the exact reviewed commit SHA. See docs/HACKATHON.md.
 - Use PRs for ongoing work after initial repository bootstrap.
 - Target policy: routine changes merge automatically only after required application checks and an explicit successful AI-review gate for the CURRENT commit, with the branch current against main.
 - Absence of AI comments, an emoji, a label, or a review of an older commit is not approval. Missing, cancelled, skipped, timed-out, or unavailable required checks must block merging.
