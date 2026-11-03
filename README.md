@@ -4,7 +4,7 @@ Hackathon workspace for four contributors using AI assistants.
 
 ## Current status
 
-The product and technology stack are not selected. AGENTS.md contains the team's working agreement. Automated application review and merging are NOT configured or active yet. Instructions alone do not enforce GitHub protections.
+The product and technology stack are not selected. AGENTS.md contains the team's working agreement. Bootstrap documentation checks and protected auto-merge are configured. Application CI and AI review are not active until a stack and review integration are selected. See [the hackathon guide](docs/HACKATHON.md).
 
 ## Before feature work
 
@@ -33,11 +33,9 @@ Assign independent features, each with one owner and its own branch. Agree on sh
 - Validation:
 - Out of scope:
 
-## Automation access needed
+## Daily workflow
 
-The GitHub connector used for initial setup could create files but did not expose repository-settings controls. The local GitHub CLI login was invalid at setup time. A working settings connection is needed to configure and verify branch protection and auto-merge.
-
-Native Codex review is configured separately in Codex's GitHub settings. An API-based reviewer instead requires an appropriately protected API secret and incurs API usage. Do not put credentials in this repository or chat.
+See [docs/HACKATHON.md](docs/HACKATHON.md) for branches, PRs, automatic documentation merges, and owner decisions for bootstrap code changes.
 
 ## Developer commands
 

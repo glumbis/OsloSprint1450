@@ -1,0 +1,76 @@
+name: Bootstrap policy
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to evaluate
+        required: true
+      expected_sha:
+        description: Exact reviewed head commit (owner approval for bootstrap changes)
+        required: true
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+concurrency:
+  group: bootstrap-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: false
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Trusted base workflow only. Never check out or execute PR files here.
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        with:
+          script: |
+            const repo = context.repo;
+            const pull_number = Number(process.env.PR_NUMBER);
+            const {data: pr} = await github.rest.pulls.get({...repo, pull_number});
+            if (pr.state !== 'open' || pr.base.ref !== 'main') return;
+            const sha = pr.head.sha;
+            const status = async (state, description) => github.rest.repos.createCommitStatus({
+              ...repo, sha, state, context: 'bootstrap-policy', description,
+              target_url: `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`
+            });
+            await status('pending', 'Evaluating bootstrap scope');
+            const block = async text => { await status('failure', text); core.setFailed(text); };
+            if (pr.draft) return block('Draft PR: mark ready before evaluation');
+            if (pr.head.repo?.full_name !== `${repo.owner}/${repo.repo}`)
+              return block('External PR: owner must bring changes to a local branch');
+            const files = await github.paginate(github.rest.pulls.listFiles, {...repo, pull_number, per_page: 100});
+            if (files.length !== pr.changed_files || files.length === 0)
+              return block('Incomplete or empty diff; manual investigation required');
+            // Only plain project notes qualify; agent instruction files are excluded everywhere.
+            const allowed = path => (path === 'README.md' || /^docs\/[a-zA-Z0-9_/-]+\.md$/.test(path))
+              && !/(^|\/)(agents|claude|gemini)(\.|\/)/i.test(path);
+            const docsOnly = files.length <= 10 && pr.additions + pr.deletions <= 500 &&
+              files.every(f => allowed(f.filename) && (!f.previous_filename || allowed(f.previous_filename)));
+            const ownerDecision = context.eventName === 'workflow_dispatch' &&
+              context.actor === repo.owner && process.env.EXPECTED_SHA === sha;
+            const {data: permission} = await github.rest.repos.getCollaboratorPermissionLevel({
+              ...repo, username: pr.user.login
+            });
+            if (!['admin', 'maintain', 'write'].includes(permission.permission))
+              return block('PR author is not an authorized contributor');
+            if (!docsOnly && !ownerDecision)
+              return block('Code/automation change: application CI not configured; owner decision needed');
+            const fresh = (await github.rest.pulls.get({...repo, pull_number})).data;
+            if (fresh.head.sha !== sha) return block('PR changed during evaluation; rerun required');
+            await status('success', docsOnly ? 'Small documentation change; scope checks passed' : 'Owner approved this exact bootstrap commit');
+            await core.summary.addHeading('Bootstrap policy').addRaw(
+              docsOnly ? 'Documentation scope checks passed. This is not AI or application validation.' :
+              'Owner explicitly approved the supplied commit. This is not application validation.'
+            ).write();
+            // GitHub enforces required checks, current base, and conversation resolution.
+            // Use protected auto-merge to avoid racing status propagation.
+            await github.graphql(`mutation($id: ID!) {
+              enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) {
+                pullRequest { number }
+              }
+            }`, {id: pr.node_id});
