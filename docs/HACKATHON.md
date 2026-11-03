@@ -41,3 +41,7 @@ No paid API reviewer or API secret has been provisioned. Reviews use the connect
 ## First ten minutes as a team
 
 Agree on the target user and a two-minute demo. Split four independent tasks, assign one owner each, agree shared interfaces, and make a tiny PR early. Keep features small; demonstrate the integrated app frequently. Reserve time for integration and presentation.
+
+## Checking the merge automation
+
+Run `node .github/tests/review-merge.cjs`. The tests execute the actual workflow script against mocked GitHub APIs, including blocked-review cases and retry deduplication. GitHub also runs this suite on pushes and PRs; it validates the merge gate, not your future application.
