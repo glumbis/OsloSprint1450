@@ -40,12 +40,16 @@ jobs:
               if (!match) return 'missing';
               let data;
               try { data = JSON.parse(match[1]); } catch { return 'invalid'; }
+              if (!data || typeof data !== 'object' || Array.isArray(data)) return 'invalid';
               const code = data.code_review;
               if (!code || code.commit_sha !== sha) return 'missing';
               if (code.status !== 'completed') return 'waiting';
               if (code.has_any_findings !== false || code.has_unresolved_findings !== false) return 'findings';
               const security = data.security_review;
-              if (security?.status != null) {
+              const absentSecurity = security == null || (typeof security === 'object' &&
+                ['status', 'commit_sha', 'has_any_findings', 'has_unresolved_findings'].every(k => security[k] === null));
+              if (!absentSecurity) {
+                if (!security || typeof security !== 'object' || typeof security.status !== 'string') return 'invalid';
                 if (security.commit_sha !== sha || security.status !== 'completed') return 'waiting';
                 if (security.has_any_findings !== false || security.has_unresolved_findings !== false) return 'findings';
               }
@@ -64,10 +68,16 @@ jobs:
               const {data: pr} = await github.rest.pulls.get({...repo, pull_number});
               if (pr.state !== 'open' || pr.base.ref !== 'main') continue;
               const sha = pr.head.sha;
-              const status = async (state, description) => github.rest.repos.createCommitStatus({
-                ...repo, sha, state, context: 'bootstrap-policy', description,
-                target_url: `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`
-              });
+              const status = async (state, description) => {
+                const {data: combined} = await github.rest.repos.getCombinedStatusForRef({...repo, ref: sha});
+                const current = combined.statuses.find(s => s.context === 'bootstrap-policy');
+                if (current?.state === state && current?.description === description &&
+                    current?.creator?.login === 'github-actions[bot]') return;
+                await github.rest.repos.createCommitStatus({
+                  ...repo, sha, state, context: 'bootstrap-policy', description,
+                  target_url: `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`
+                });
+              };
               if (pr.draft) { await status('pending', 'Draft: mark ready to request review'); continue; }
               if (pr.head.repo?.full_name !== `${repo.owner}/${repo.repo}`) {
                 await status('failure', 'External fork: bring changes to a team branch first'); continue;
