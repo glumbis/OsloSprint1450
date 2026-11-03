@@ -29,16 +29,15 @@ OsloSprint1450 is preparing for a hackathon. The product, language, framework, d
 - Stage only task changes. Do not reset, delete, rewrite, or force-push another contributor's work.
 
 ## Review and merge policy
-- Bootstrap exception: small README/docs-only PRs from repository contributors may merge after the `bootstrap-policy` scope gate. This is not AI review. Other bootstrap PRs require glumbis to run the Bootstrap policy workflow with the exact reviewed commit SHA. See docs/HACKATHON.md.
-- Use PRs for ongoing work after initial repository bootstrap.
-- Target policy: routine changes merge automatically only after required application checks and an explicit successful AI-review gate for the CURRENT commit, with the branch current against main.
-- Absence of AI comments, an emoji, a label, or a review of an older commit is not approval. Missing, cancelled, skipped, timed-out, or unavailable required checks must block merging.
-- Until the stack, checks, review integration, and GitHub protections are configured and tested, automated code merging must remain disabled.
-- Changes to authentication, authorization, payments, destructive operations, database migrations, public contracts, deployment, dependencies, CI, review/merge automation, or these instructions require glumbis's review. Keep routine feature work off that path where possible.
-- Do not bypass protections, self-approve using another identity, or change merge rules to unblock work.
-- An approved PR does not authorize a deployment or paid service.
-- PR descriptions must state the user-visible outcome, linked task, validation, dependencies, and material limitations. Include screenshots for visible UI changes where helpful.
-- Never claim automatic review or merging is active without verifying an end-to-end PR.
+- Open PRs from separate team branches for all work. All sizes and file types use the same automated review gate.
+- The real Codex bot must report a completed review with no findings for the exact current commit. Missing, stale, malformed, or unfinished review results block merging. If Security Review runs, it must also complete cleanly for that commit.
+- The trusted base-branch workflow requests missing reviews once per commit and retries protected merges. Never execute PR code with its write-capable token or weaken reviewer identity/commit checks.
+- GitHub enforces the required `bootstrap-policy` status, current base, and resolved conversations. Any additional required application checks also apply.
+- Application build/tests are not configured yet. A clean AI review is not evidence that the app builds or works. Add real required CI as soon as the stack is selected.
+- Fix review findings, push changes, and obtain a new review. Never treat silence, an emoji, or a review of an older commit as approval.
+- Security, database, dependency, deployment, and automation changes need explicit risk/validation notes in the PR. The team's selected policy permits automatic merging when the review and configured checks pass; deployment remains separate.
+- External forks must be brought onto a team-owned branch by an authorized contributor before using this merge automation.
+- Keep PR descriptions concise: intended behavior, linked task, validation results, and material limitations. Never bypass protections or claim checks that did not run.
 
 ## Keep usage low
 - Use one agent per task by default; do not spawn additional agents unless requested.
