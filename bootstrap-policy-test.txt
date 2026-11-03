@@ -1,0 +1,1 @@
+Temporary fixture: non-documentation changes must be blocked.
