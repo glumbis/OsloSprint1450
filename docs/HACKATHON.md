@@ -15,23 +15,28 @@ Ask your AI to read AGENTS.md, implement one task, run relevant checks, and open
 
 ## What is automated now
 
-The Bootstrap policy workflow evaluates PR metadata without executing PR code. Small README.md or docs/*.md changes (at most 10 files and 500 changed lines) from repository contributors can pass and merge automatically. Agent instruction files are excluded. This checks scope, not prose correctness, links, AI findings, or application behavior.
+All team PRs, including code and large changes, use the same Codex review gate. It checks the real bot identity, exact current commit, completed review, and absence of findings. Optional Security Review must also be clean when it runs. Missing or unrecognized review data keeps the PR blocked.
 
-Code, configuration, large changes, and external contributions cannot use this automatic path. Main requires the bootstrap-policy status, an up-to-date branch, and resolved review conversations. Force pushes and deletion are disabled. Administrators are subject to protection too.
+The workflow reads GitHub metadata only; it never checks out or executes PR code. It attempts a squash merge using the reviewed commit SHA, so a newer commit cannot slip into that merge. GitHub still enforces required checks, up-to-date branches, and resolved conversations.
 
-For an intentional bootstrap change, glumbis can open Actions > Bootstrap policy > Run workflow on main, supply the PR number and exact head commit SHA, and run it. This is an explicit owner approval for that commit and enables protected merging. It does not claim tests passed. Refresh the branch and repeat the decision if the commit changes. Contributors cannot use this owner path.
+Review-summary events trigger evaluation. A scheduled retry runs approximately every ten minutes (GitHub scheduling can be delayed). Missing reviews are requested once per commit after a short grace period. This does not repeatedly invoke AI when nothing changes. If quota or service availability prevents review, fix the issue and request `@codex review` again.
 
-Draft PRs remain blocked until marked ready. If another PR merges first, use Update branch and let the gate rerun. New workflow changes must be reviewed carefully; they govern repository permissions.
+If another PR lands first, use Update branch. The new commit needs a new review. Draft PRs remain blocked. External forks must first be brought to a team branch.
 
-## Before automatic application merges
+The required status remains named `bootstrap-policy` for continuity with existing branch protection. Administrators are subject to protection too. There is no blanket human approval requirement and no owner bypass in the new workflow.
 
-1. Pick the smallest product demo and stack with glumbis.
+## Before building your application
+
+1. Agree on the smallest product demo and choose the stack.
 2. Establish installation, build, lint/type checks, and meaningful tests in CI.
-3. Configure Codex review and an explicit machine-readable AI-review result tied to the current commit. Bot silence is not an approval. Native Codex review settings are separate from GitHub settings.
-4. Replace the bootstrap-only code restriction with tested application and AI gates; require those checks in branch protection. Keep sensitive changes on the owner-review path.
-5. Test failing checks, missing review, new commits, conflicts, sensitive files, and successful routine PRs before enabling application auto-merge.
+3. Add those application checks to main's required checks. The merge workflow respects them.
+4. Test passing and failing application PRs before relying on automatic merges for the demo.
 
-No API key or paid AI workflow has been provisioned. Do not paste credentials into issues, PRs, or chat. Use repository secrets for any future API integration.
+No application CI exists yet. Automated review is useful feedback, not proof that an application runs. Native Codex review focuses on serious findings and can miss issues. Keep PRs small even though large PRs are accepted.
+
+The review-summary metadata format is supplied by the Codex integration. If it changes, the gate fails closed and needs updating; it does not infer success from prose or emojis.
+
+No paid API reviewer or API secret has been provisioned. Reviews use the connected Codex integration and its applicable allowance.
 
 ## First ten minutes as a team
 

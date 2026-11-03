@@ -1,76 +1,109 @@
-name: Bootstrap policy
+name: Reviewed PR merge
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  issue_comment:
+    types: [created, edited]
+  schedule:
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       pr:
-        description: PR number to evaluate
-        required: true
-      expected_sha:
-        description: Exact reviewed head commit (owner approval for bootstrap changes)
-        required: true
+        description: Optional PR number (blank checks all open team PRs)
+        required: false
 permissions:
   contents: write
   pull-requests: write
+  issues: write
   statuses: write
 concurrency:
-  group: bootstrap-${{ github.event.pull_request.number || inputs.pr }}
+  group: reviewed-pr-merge
   cancel-in-progress: false
 jobs:
   policy:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      # Trusted base workflow only. Never check out or execute PR files here.
       - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          PR_NUMBER: ${{ inputs.pr }}
         with:
           script: |
             const repo = context.repo;
-            const pull_number = Number(process.env.PR_NUMBER);
-            const {data: pr} = await github.rest.pulls.get({...repo, pull_number});
-            if (pr.state !== 'open' || pr.base.ref !== 'main') return;
-            const sha = pr.head.sha;
-            const status = async (state, description) => github.rest.repos.createCommitStatus({
-              ...repo, sha, state, context: 'bootstrap-policy', description,
-              target_url: `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`
-            });
-            await status('pending', 'Evaluating bootstrap scope');
-            const block = async text => { await status('failure', text); core.setFailed(text); };
-            if (pr.draft) return block('Draft PR: mark ready before evaluation');
-            if (pr.head.repo?.full_name !== `${repo.owner}/${repo.repo}`)
-              return block('External PR: owner must bring changes to a local branch');
-            const files = await github.paginate(github.rest.pulls.listFiles, {...repo, pull_number, per_page: 100});
-            if (files.length !== pr.changed_files || files.length === 0)
-              return block('Incomplete or empty diff; manual investigation required');
-            // Only plain project notes qualify; agent instruction files are excluded everywhere.
-            const allowed = path => (path === 'README.md' || /^docs\/[a-zA-Z0-9_/-]+\.md$/.test(path))
-              && !/(^|\/)(agents|claude|gemini)(\.|\/)/i.test(path);
-            const docsOnly = files.length <= 10 && pr.additions + pr.deletions <= 500 &&
-              files.every(f => allowed(f.filename) && (!f.previous_filename || allowed(f.previous_filename)));
-            const ownerDecision = context.eventName === 'workflow_dispatch' &&
-              context.actor === repo.owner && process.env.EXPECTED_SHA === sha;
-            const {data: permission} = await github.rest.repos.getCollaboratorPermissionLevel({
-              ...repo, username: pr.user.login
-            });
-            if (!['admin', 'maintain', 'write'].includes(permission.permission))
-              return block('PR author is not an authorized contributor');
-            if (!docsOnly && !ownerDecision)
-              return block('Code/automation change: application CI not configured; owner decision needed');
-            const fresh = (await github.rest.pulls.get({...repo, pull_number})).data;
-            if (fresh.head.sha !== sha) return block('PR changed during evaluation; rerun required');
-            await status('success', docsOnly ? 'Small documentation change; scope checks passed' : 'Owner approved this exact bootstrap commit');
-            await core.summary.addHeading('Bootstrap policy').addRaw(
-              docsOnly ? 'Documentation scope checks passed. This is not AI or application validation.' :
-              'Owner explicitly approved the supplied commit. This is not application validation.'
-            ).write();
-            // GitHub enforces required checks, current base, and conversation resolution.
-            // Use protected auto-merge to avoid racing status propagation.
-            await github.graphql(`mutation($id: ID!) {
-              enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) {
-                pullRequest { number }
+            const botId = 199175422;
+            const botLogin = 'chatgpt-codex-connector[bot]';
+            function reviewState(comments, sha) {
+              const trusted = comments.filter(c => c.user?.id === botId && c.user?.login === botLogin &&
+                c.user?.type === 'Bot' && c.body?.includes('<!-- codex-pull-request-review-summary -->'));
+              const latest = trusted.sort((a, b) => b.id - a.id)[0];
+              const match = latest?.body.match(/<!-- codex-review-state:v1 (.*?) -->/s);
+              if (!match) return 'missing';
+              let data;
+              try { data = JSON.parse(match[1]); } catch { return 'invalid'; }
+              const code = data.code_review;
+              if (!code || code.commit_sha !== sha) return 'missing';
+              if (code.status !== 'completed') return 'waiting';
+              if (code.has_any_findings !== false || code.has_unresolved_findings !== false) return 'findings';
+              const security = data.security_review;
+              if (security?.status != null) {
+                if (security.commit_sha !== sha || security.status !== 'completed') return 'waiting';
+                if (security.has_any_findings !== false || security.has_unresolved_findings !== false) return 'findings';
               }
-            }`, {id: pr.node_id});
+              return 'clean';
+            }
+            // All data is obtained through GitHub APIs. Never check out or execute PR code.
+            let numbers;
+            if (context.payload.pull_request) numbers = [context.payload.pull_request.number];
+            else if (context.payload.issue?.pull_request) {
+              // Only the real Codex bot can wake this workflow via its review summary.
+              if (context.payload.comment?.user?.id !== botId) return;
+              numbers = [context.payload.issue.number];
+            } else if (process.env.PR_NUMBER) numbers = [Number(process.env.PR_NUMBER)];
+            else numbers = (await github.paginate(github.rest.pulls.list, {...repo, state: 'open', base: 'main', per_page: 100})).map(p => p.number);
+            for (const pull_number of numbers) {
+              const {data: pr} = await github.rest.pulls.get({...repo, pull_number});
+              if (pr.state !== 'open' || pr.base.ref !== 'main') continue;
+              const sha = pr.head.sha;
+              const status = async (state, description) => github.rest.repos.createCommitStatus({
+                ...repo, sha, state, context: 'bootstrap-policy', description,
+                target_url: `${context.serverUrl}/${repo.owner}/${repo.repo}/actions/runs/${context.runId}`
+              });
+              if (pr.draft) { await status('pending', 'Draft: mark ready to request review'); continue; }
+              if (pr.head.repo?.full_name !== `${repo.owner}/${repo.repo}`) {
+                await status('failure', 'External fork: bring changes to a team branch first'); continue;
+              }
+              const {data: permission} = await github.rest.repos.getCollaboratorPermissionLevel({...repo, username: pr.user.login});
+              if (!['admin', 'maintain', 'write'].includes(permission.permission)) {
+                await status('failure', 'PR author is not an authorized contributor'); continue;
+              }
+              const comments = await github.paginate(github.rest.issues.listComments, {...repo, issue_number: pull_number, per_page: 100});
+              const state = reviewState(comments, sha);
+              if (state !== 'clean') {
+                await status(state === 'findings' || state === 'invalid' ? 'failure' : 'pending',
+                  state === 'findings' ? 'Codex reported findings; fix and request a new review' :
+                  state === 'invalid' ? 'Codex result format unrecognized; merge blocked' : 'Waiting for a clean Codex review of this commit');
+                // Give native automatic review a head start. Request only once per exact commit.
+                // Human/manual retries remain available if Codex is unavailable or quota-limited.
+                const marker = `<!-- codex-request:${sha} -->`;
+                if (state === 'missing' && Date.now() - Date.parse(pr.updated_at) > 120000 &&
+                    !comments.some(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker))) {
+                  await github.rest.issues.createComment({...repo, issue_number: pull_number,
+                    body: `@codex review\n\n${marker}\nPlease review the current commit ${sha}.`});
+                }
+                continue;
+              }
+              const fresh = (await github.rest.pulls.get({...repo, pull_number})).data;
+              if (fresh.head.sha !== sha || fresh.state !== 'open' || fresh.draft) continue;
+              await status('success', 'Codex completed this exact commit with no findings');
+              // Immediate protected merge handles GitHub's UNSTABLE state (optional failed checks).
+              // SHA prevents merging a newer unreviewed commit. GitHub still enforces all protections.
+              try {
+                const result = await github.rest.pulls.merge({...repo, pull_number, sha, merge_method: 'squash'});
+                if (!result.data.merged) core.info(`PR ${pull_number}: ${result.data.message}`);
+                else core.info(`PR ${pull_number}: merged reviewed commit ${sha}`);
+              } catch (error) {
+                if ([405, 409].includes(error.status)) {
+                  core.info(`PR ${pull_number}: GitHub is waiting on required checks, an updated branch, or conflict resolution. Will retry.`);
+                } else throw error;
+              }
+            }
